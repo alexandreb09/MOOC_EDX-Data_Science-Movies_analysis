@@ -181,9 +181,7 @@ rm(l, predicted_ratings, removed, RMSE, temp, test_index, test_set, train_set)
 
 
 # Save workspace for R Markdown
-# save.image(file = "processed_work_space.RData")
-save.image(file = "D:/1_Cours/EDX/Data Science - Harvard/Cours 9_Capstone/Movies/edx_dataset_R enviroment.RData")
-
+save.image(file = "processed_work_space.RData")
 
 
 

@@ -2,7 +2,8 @@
 title: "report"
 author: "Alexandre Bort"
 date: "13 June 2019"
-output: html_document
+output:
+  pdf_document: default
 ---
 
 **About me**
@@ -12,10 +13,8 @@ Welcome to my report. I'm Alexandre, a french student from ISIMA engineering sch
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-```
-```{r , include=FALSE}
 # load("processed_work_space.RData")
-load("D:/1_Cours/EDX/Data Science - Harvard/Cours 9_Capstone/Movies/edx_dataset_R enviroment.RData")
+load("D:/1_Cours/EDX/Data Science - Harvard/Cours 9_Capstone/Movies/edx_enviroment.RData")
 library(tidyverse)
 library(ggplot2)
 ```
@@ -153,7 +152,7 @@ We can summarize it in 3 steps:
     3. Apply the model to the dataset
   
 The second step is done over a range of `lambda` candidates. 
-The following plot shows the `RMSE` per `lambda` candidate.
+The following plot show the `RMSE` per `lambda` candidate.
 ```{r lambda}
 qplot(lambdas, rmses)  
 ```
@@ -189,3 +188,4 @@ The model implemented relies only on the overall mean, the regularized movie eff
 Further improvements would not only require substantially more effort, but also more computing resources, in particular enough memory for operations on large matrices (even if sparse matrices are used).
 
 Thank you for reading :-)
+.
