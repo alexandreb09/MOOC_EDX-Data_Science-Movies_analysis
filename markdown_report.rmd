@@ -13,8 +13,7 @@ Welcome to my report. I'm Alexandre, a french student from ISIMA engineering sch
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-# load("processed_work_space.RData")
-load("D:/1_Cours/EDX/Data Science - Harvard/Cours 9_Capstone/Movies/edx_enviroment.RData")
+load("processed_work_space.RData")
 library(tidyverse)
 library(ggplot2)
 ```
