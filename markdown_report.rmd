@@ -1,0 +1,191 @@
+---
+title: "report"
+author: "Alexandre Bort"
+date: "13 June 2019"
+output: html_document
+---
+
+**About me**
+
+Welcome to my report. I'm Alexandre, a french student from ISIMA engineering school. My English isn't very good, but I will try to do my best ! Hope you will enjoy reading it!
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r , include=FALSE}
+# load("processed_work_space.RData")
+load("D:/1_Cours/EDX/Data Science - Harvard/Cours 9_Capstone/Movies/edx_dataset_R enviroment.RData")
+library(tidyverse)
+library(ggplot2)
+```
+
+<style type="text/css">
+
+body{ /* Normal  */
+    font-size: 12px;
+}
+td {  /* Table  */
+  font-size: 8px;
+}
+h1.title {
+  font-size: 38px;
+  color: DarkRed;
+}
+h1 { /* Header 1 */
+  font-size: 28px;
+  color: DarkBlue;
+}
+h2 { /* Header 2 */
+    font-size: 22px;
+  color: DarkBlue;
+}
+h3 { /* Header 3 */
+  font-size: 18px;
+  font-family: "Times New Roman", Times, serif;
+  color: DarkBlue;
+}
+code.r{ /* Code block */
+    font-size: 12px;
+}
+pre { /* Code block - determines code spacing between lines */
+    font-size: 14px;
+}
+</style>
+
+---
+## Plan of the study
+1. Introduction
+2. Methods - Analysis 
+    1. Data overview
+    2. Pre-processing
+    3. Memory limits
+    4. Model
+3. Results
+4. Conclusion
+5. Extra
+
+
+# I. Introduction
+
+Film industry didn't stopped growing the last decades. The development of the new technologies provides an easy access to films for everyone. Film producer and especially film distributors such as Netflix or even YouTube try to satisfy their users as best as possible. To do this, they use data analysis approaches. For example, that gives them the ability to improve their film suggestion system.
+
+Here, we will try to **predict the interest that a user could have for a film**. I will minimise the `RMSE` (Root Mean Square Error) criteria as seen in the course.
+
+We will build out study on the ***MoviesLens*** dataset provided by the edx team. The dataset is available this [link](http://files.grouplens.org/datasets/movielens/ml-10m.zip). 
+The dataset is composed by two main dataframes, one called `edx` for training and one called `validation` for testing our model. 
+
+In my work, I have tried two approaches. The first one is to predict the rating from a linear regression model. I used the `lm` function after some preprocessing (extracting date, binarizing genre columns...). However, the results weren't as expected. The RMSE was above `1` that is not acceptable. Also, I met **memory issues** that lead me to reduce the size of the dataset (edx to 200 000rows). I explore the `xgboost` library in R that implements a gradient boosted tree algorithm. Finally, I gave up this approach and try to find more efficient one.
+
+So I come back to the lesson basics. I implemented a **linear model** that assigned the rating of a movie to the mean of all ratings minus the mean of the ratings grouped by user and movie Id (code is simpler than long sentences). Then I computed the RMSE.
+
+
+# II. Methods - Analysis
+## II.1. Data overview
+**Data**:
+
+```{r edx}
+head(edx)
+```
+
+Let's see some **statistic** about our `edx` and `evaluation` dataframe:
+``` {r validation}
+summary(edx)
+summary(validation)
+```
+
+## II.2. Pre-processing
+After a brief overview of the dataset, we can notice two things:
+  - The `title` column contains a year between parenthesis. We can consider that the interest of customer changes across the year. We can extract them as a new column with the bellow code:
+
+``` {r }
+df <- head(edx)
+# Extract year as a new column
+df$year = as.numeric(substr(df$title, nchar(df$title)-4, nchar(df$title)-1))
+df$title = substr(df$title, 0 , nchar(df$title)-7)
+df
+```
+  - The `genres` columns is defined in one string having several genres. The matter with this representation is that we do not distinguish the genre inside the text. One idea is to binarize the genre column in new genre columns. Here's the code:
+
+``` {r }
+# Select all genres (uniques)
+list_genre <- unique(separate_rows(data = df["genres"], genres, sep = "\\|"))
+nb_genres <- nrow(list_genre)
+# Create empty matrix
+genres_col <- as.data.frame(matrix(0, ncol = nb_genres, nrow = nrow(df)))
+# Set col names
+colnames(genres_col) <- as.list(list_genre)[[1]]
+# Add columns to edx dataframe
+df <- cbind(df, genres_col)
+
+set_genre <- function(row){
+  genres <- strsplit(row["genres"], "\\|")[[1]]
+  row[genres] <- 1
+  return(row)
+}
+df <- as.data.frame(t(apply(df, MARGIN=1, FUN=set_genre)))
+
+# remove genre columns
+df <- df[setdiff(names(df), c("genres"))]
+df
+```
+
+## II.3. Memory limits
+Unfortunately, all the precedent pre-processing is resource consuming. My current PC does not give me the opportunity to perform the task in a reasonable time (still processing `edx` after 15min).
+
+The first point seems to be done in a reasonable time, but not the second. I tried this process on a little subset (200 000 rows). It seems to improve the RMSE compared to non pre-processed data. However, RMSE is bellow than the one got on the whole dataset without pre-processing.
+
+I don't know how to improve this code. If you have any ideas, let me know in comments :-)
+
+The next of the report assumes the data isn't pre-processed.
+## II.4. Model
+Now we know our dataset, we can start building the model. The model I'm fitting is the following:
+$$ Y_{u,i} = \mu + b_i + b_u + \epsilon_{u,i}$$
+where :
+    $\epsilon_{u,i}$ is a random error term
+    $\mu$ is the overall mean of all ratings across all users
+    $b_i$ is the movie specific mean
+    $b_u$ is the user specific mean 
+
+We can summarize it in 3 steps:
+    1. Build the training - test dataset
+    2. Find the lambda value that minimizes the `RMSE`
+    3. Apply the model to the dataset
+  
+The second step is done over a range of `lambda` candidates. 
+The following plot shows the `RMSE` per `lambda` candidate.
+```{r lambda}
+qplot(lambdas, rmses)  
+```
+
+We can now find the best `lambda`:
+``` {r rmses}
+lambdas[which.min(rmses)]
+```
+
+The first and third steps are explained in the R code.
+
+# III.Results
+Now we have our model, we are ready to evaluate the model. The results are as bellow:
+```{r results, echo= FALSE}
+
+print(paste0("mu: ", round(mu,3)))
+print(paste0("lambda: ", round(lambda,3)))
+print(paste0("RMSE: ", round(final_rmse,5)))
+```
+
+$b_u$ and $b_i$ were widely distributed as seen below
+```{r b_i, b_u, echo=FALSE}
+
+ggplot(b_i, aes(x=b_i), alpha=0.8, size=0.8)  + 
+  geom_histogram(binwidth=0.2, color="black", fill="lightblue")
+ggplot(b_u, aes(x=b_u), alpha=0.8, size=0.8)  +
+  geom_histogram(binwidth=0.2, color="black", fill="lightblue")
+```
+
+# IV. Conclusion
+The model implemented relies only on the overall mean, the regularized movie effect, and the regularized user effect. It comes very close to the best possible result.
+
+Further improvements would not only require substantially more effort, but also more computing resources, in particular enough memory for operations on large matrices (even if sparse matrices are used).
+
+Thank you for reading :-)
