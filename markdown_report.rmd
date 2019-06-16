@@ -1,14 +1,17 @@
 ---
-title: "report"
+title: "EDX Capstone - Movielens project"
 author: "Alexandre Bort"
 date: "13 June 2019"
 output:
+  html_document:
+    df_print: paged
   pdf_document: default
 ---
 
 **About me**
 
-Welcome to my report. I'm Alexandre, a french student from ISIMA engineering school. My English isn't very good, but I will try to do my best ! Hope you will enjoy reading it!
+Welcome to my report. I'm Alexandre Bort, a french student from ISIMA engineering school. My English isn't very good, but I will try to do my best ! Hope you will enjoy reading it!
+
 
 
 ```{r setup, include=FALSE}
@@ -16,6 +19,7 @@ knitr::opts_chunk$set(echo = TRUE)
 load("processed_work_space.RData")
 library(tidyverse)
 library(ggplot2)
+library(rpart.plot)
 ```
 
 <style type="text/css">
@@ -52,6 +56,7 @@ pre { /* Code block - determines code spacing between lines */
 </style>
 
 ---
+
 ## Plan of the study
 1. Introduction
 2. Methods - Analysis 
@@ -66,16 +71,14 @@ pre { /* Code block - determines code spacing between lines */
 
 # I. Introduction
 
-Film industry didn't stopped growing the last decades. The development of the new technologies provides an easy access to films for everyone. Film producer and especially film distributors such as Netflix or even YouTube try to satisfy their users as best as possible. To do this, they use data analysis approaches. For example, that gives them the ability to improve their film suggestion system.
+Film industry didn't stop growing the last decades. The development of the new technologies provides an easy access to films for everyone. Film producers and especially film distributors such as Netflix or even YouTube try to satisfy their users as best as possible. To do this, they use data analysis approaches. For example, that gives them the ability to improve their film suggestion system.
 
 Here, we will try to **predict the interest that a user could have for a film**. I will minimise the `RMSE` (Root Mean Square Error) criteria as seen in the course.
 
 We will build out study on the ***MoviesLens*** dataset provided by the edx team. The dataset is available this [link](http://files.grouplens.org/datasets/movielens/ml-10m.zip). 
-The dataset is composed by two main dataframes, one called `edx` for training and one called `validation` for testing our model. 
+The dataset is composed by two main dataframes, one called `edx` for training and one called `validation` for testing our models. 
 
-In my work, I have tried two approaches. The first one is to predict the rating from a linear regression model. I used the `lm` function after some preprocessing (extracting date, binarizing genre columns...). However, the results weren't as expected. The RMSE was above `1` that is not acceptable. Also, I met **memory issues** that lead me to reduce the size of the dataset (edx to 200 000rows). I explore the `xgboost` library in R that implements a gradient boosted tree algorithm. Finally, I gave up this approach and try to find more efficient one.
-
-So I come back to the lesson basics. I implemented a **linear model** that assigned the rating of a movie to the mean of all ratings minus the mean of the ratings grouped by user and movie Id (code is simpler than long sentences). Then I computed the RMSE.
+In my work, I will study several approaches. The first one is to predict the rating from a linear regression model. Then, we will build a **decision tree** and finally a **random forest model**.
 
 
 # II. Methods - Analysis
@@ -87,23 +90,47 @@ head(edx)
 ```
 
 Let's see some **statistic** about our `edx` and `evaluation` dataframe:
+``` {r, echo=FALSE}
+edx <- edx[seq(1,1000000),]
+```
 ``` {r validation}
 summary(edx)
 summary(validation)
 ```
 
+Let have a look at the most rated genres:
+```{r plot1}
+plot1
+```
+People don't seem to be really studious, they widely prefer looking a drama film than a documentary film!
+
+How are they used to rate a film ? The following graph shows that they don't really like comma number rate. Also, most of the time, they seem to like what they have looked.
+```{r }
+edx %>%
+   ggplot(aes(rating)) + 
+   geom_histogram(bins = 20,color="darkblue", fill="darkblue")+
+   ggtitle("Distribution of Rating") + 
+   theme(plot.title = element_text(color="black", size=13, face="bold"))
+```
+
+
 ## II.2. Pre-processing
 After a brief overview of the dataset, we can notice two things:
-  - The `title` column contains a year between parenthesis. We can consider that the interest of customer changes across the year. We can extract them as a new column with the bellow code:
+  - The `title` column contains a **year** between parenthesis. We can consider that the interest of customer changes across the year. We can extract them as a new column with the bellow code:
+
+```{r , echo=FALSE}
+edx <- edx_init
+```
 
 ``` {r }
-df <- head(edx)
+df <- edx[seq(1,100000),]
 # Extract year as a new column
 df$year = as.numeric(substr(df$title, nchar(df$title)-4, nchar(df$title)-1))
 df$title = substr(df$title, 0 , nchar(df$title)-7)
-df
+head(df)
 ```
-  - The `genres` columns is defined in one string having several genres. The matter with this representation is that we do not distinguish the genre inside the text. One idea is to binarize the genre column in new genre columns. Here's the code:
+
+  - The `genres` column is defined in one string having several genres. The matter with this representation is that we do not distinguish the genre inside the text. One idea is to binarize the genre column in new genre columns. Here's the code:
 
 ``` {r }
 # Select all genres (uniques)
@@ -111,10 +138,13 @@ list_genre <- unique(separate_rows(data = df["genres"], genres, sep = "\\|"))
 nb_genres <- nrow(list_genre)
 # Create empty matrix
 genres_col <- as.data.frame(matrix(0, ncol = nb_genres, nrow = nrow(df)))
+
 # Set col names
 colnames(genres_col) <- as.list(list_genre)[[1]]
 # Add columns to edx dataframe
 df <- cbind(df, genres_col)
+
+rm(genres_col)
 
 set_genre <- function(row){
   genres <- strsplit(row["genres"], "\\|")[[1]]
@@ -124,20 +154,52 @@ set_genre <- function(row){
 df <- as.data.frame(t(apply(df, MARGIN=1, FUN=set_genre)))
 
 # remove genre columns
-df <- df[setdiff(names(df), c("genres"))]
-df
+df <- df[setdiff(names(df), c("genres","title", "timestamp"))]
+head(df)
+```
+
+Now that we have exploded the `genre` column, we can see the repartition. 
+```{r , echo=FALSE}
+genre_cols <- colnames(df)[seq(5, length(colnames(df)))]
+df[, genre_cols] <- as.data.frame(apply(df[genre_cols], 2, as.numeric))
+```
+``` {r}
+  q <- quantile(apply(df[,genre_cols], 2, sum))
+  q
+```
+Some genres are not very representative, so we can group them in a unique column `Other`. The following code groups the column below the first quartile.
+```{r}
+  column_below_q1 <- genre_cols[q < q[[2]]]
+
+  keep <- function(row){
+    return (if(sum(row) > 0) 1 else 0)
+  }
+  df$other <- apply(df[column_below_q1], 1, keep)
+  df <- df[, !names(df) %in% column_below_q1, drop=F]
+  head(df)
+```
+
+
+### Training - Validation dataset
+Great ! This task has already been done for us ! The datset provided by the edx team is composed of two datasets: `edx` and `validation`. The `edx` dataset will be used to build our models and the `evaluation` dataset to evaluate them.
+```
+train_set <- edx        
+test_set  <- validation
 ```
 
 ## II.3. Memory limits
-Unfortunately, all the precedent pre-processing is resource consuming. My current PC does not give me the opportunity to perform the task in a reasonable time (still processing `edx` after 15min).
+Unfortunately, all the precedent pre-processing tasks are resource consuming. My current PC does not give me the opportunity to perform the task in a reasonable time (still processing `edx` after 15min when trying to explode the genre column).
 
-The first point seems to be done in a reasonable time, but not the second. I tried this process on a little subset (200 000 rows). It seems to improve the RMSE compared to non pre-processed data. However, RMSE is bellow than the one got on the whole dataset without pre-processing.
+The year extraction can be to be done in a reasonable time, but not the second one. Trying to run it on the whole `edx` dataset takes a very long time. I haven't been able to perform this task on my personal computer. As you will read in the next chapters, I have performed this task on an `edx` dataset sample (100 000 rows) for the Decision tree and Random Forest models. However, for the linear model, I use the whole `edx` dataset without applying this pre-process.
 
-I don't know how to improve this code. If you have any ideas, let me know in comments :-)
 
-The next of the report assumes the data isn't pre-processed.
 ## II.4. Model
-Now we know our dataset, we can start building the model. The model I'm fitting is the following:
+To answer the initial question, I implemented three models: a linear model, a decision tree model and a random forest model.
+
+### II.4.1. Linear model
+The **linear model** assignes the rating of a movie to the mean of all ratings minus the mean of the ratings grouped by user and movie Id (code is simpler than long sentences). Then I computed the RMSE.
+
+The model is fitting the following equation:
 $$ Y_{u,i} = \mu + b_i + b_u + \epsilon_{u,i}$$
 where :
     $\epsilon_{u,i}$ is a random error term
@@ -145,46 +207,174 @@ where :
     $b_i$ is the movie specific mean
     $b_u$ is the user specific mean 
 
-We can summarize it in 3 steps:
-    1. Build the training - test dataset
-    2. Find the lambda value that minimizes the `RMSE`
-    3. Apply the model to the dataset
+The crucial step in the building process is to minimize the lambda value. To answer this job, we select a range of lambda values from `0` to `10` and compute the RMSE for all the lambda candidates. 
+```{r}
+# Renaing variable as usual analysis
+train_set <- edx
+test_set  <- validation
+
+# Prepare test_set for linear model
+test_set_lm <- test_set %>% 
+  semi_join(train_set, by = "movieId") %>%
+  semi_join(train_set, by = "userId") 
+
+# Compute RMSE
+compute_RMSE <- function(lambda, train_set, test_set){
   
-The second step is done over a range of `lambda` candidates. 
-The following plot show the `RMSE` per `lambda` candidate.
-```{r lambda}
-qplot(lambdas, rmses)  
+  mu <- mean(train_set$rating)
+  
+  b_i <- train_set %>% 
+            group_by(movieId) %>%
+            summarize(b_i = sum(rating - mu)/(n()+lambda))
+  
+  b_u <- train_set %>% 
+            left_join(b_i, by="movieId") %>%
+            group_by(userId) %>%
+            summarize(b_u = sum(rating - b_i - mu)/(n()+lambda))
+  
+  predicted_ratings <- test_set %>% 
+                          left_join(b_i, by = "movieId") %>%
+                          left_join(b_u, by = "userId") %>%
+                          mutate(pred = mu + b_i + b_u) %>%
+                          pull(pred)
+  
+  # print(paste("Lambda:", lambda))
+  
+  return(RMSE(predicted_ratings, test_set$rating))
+}
+
+
+# Create a set of lambdas to test for regularization
+lambdas <- seq(0, 10, 0.5)
+
+#For each value of lambda in lambdas, calculate the RMSE
+rmses <- sapply(lambdas, compute_RMSE, train_set=train_set, test_set=test_set_lm)
 ```
 
-We can now find the best `lambda`:
+The following plot shows the `RMSE` per `lambda` candidate.
+```{r}
+ggplot(as.data.frame(cbind(lambdas, rmses)), aes(lambdas, rmses)) + 
+              geom_line(color='steelblue', size=2) + 
+              ggtitle("RMSE vs lambda")
+```
+
+We can now find the best `lambda` that minimize the RMSE:
 ``` {r rmses}
-lambdas[which.min(rmses)]
+paste("Landa minimizing RMSE:", lambdas[which.min(rmses)])
 ```
 
-The first and third steps are explained in the R code.
+### Decision tree
+The second model is a decision tree. I build it with the `rpart` function from [rpart module](https://www.rdocumentation.org/packages/rpart/versions/4.1-15/topics/rpart). Building a decision tree is resource consuming. For this reason, I use a sample of the dataset (100 000rows) to build it. Also, because I deal with a fewer dataset, I explode the `genres` column in binary columns and group the least frequent (see chapter II - Preprocessing). 
+
+``` {r, eval = FALSE}
+
+# Renaming variables
+train_set <- edx       
+test_set  <- validation
+
+# Reduce size on training and test dataset
+train_set <- train_set[sample(nrow(train_set), 100000), ]
+test_set <- test_set[sample(nrow(test_set), 50000),]
+
+# Pre-process
+train_set <- pre_process_data_FT(train_set)
+test_set <- pre_process_data_FT(test_set)
+
+genre_names <- colnames(train_set)[seq(4, length(colnames(train_set)))]
+
+train_set <- group_genres_columns(train_set, genre_names)
+test_set <- group_genres_columns(test_set, genre_names)
+
+feature_names <- colnames(train_set)[! colnames(train_set) %in% c('rating')]
+
+# Prediction formula 
+predictor_formula <- paste("rating ~", paste(feature_names, collapse = " + "))
+predictor_formula
+[1] "rating ~ userId + movieId + Action + Drama + War + Horror + Comedy + Romance + Children + Musical + Fantasy +
+Mystery + Western + Crime + Documentary + IMAX + Sci_Fi + Film_Noir + other"
+
+# Build model
+model_tree <- rpart(predictor_formula, data=train_set)
+```
+
+The decision tree is the following:
+```{r}
+rpart.plot(model_tree, cex.main=2,
+           main="Classification Tree - Rating",
+           box.palette="RdBu", shadow.col="gray", nn=TRUE)
+```
+
+### Random Forest model
+I build the random forest model with `randomForest` method from [randomForest module](https://www.rdocumentation.org/packages/randomForest/versions/4.6-14/topics/randomForest). The model is built from the sampled dataset (100 000rows). I apply the whole pre-process steps on.
+``` {r eval = FALSE}
+# Renaing variable as usual analysis
+train_set <- edx        
+test_set  <- validation
+
+# Reduce size on training and test dataset
+train_set <- train_set[sample(nrow(train_set), 10000), ]
+test_set <- test_set[sample(nrow(test_set), 5000),]
+
+# Create feature dataset for training
+train_x <- train_set[setdiff(names(train_set), c("rating"))]
+
+# Pre-process data
+train_x <- pre_process_data_FT(train_x)
+test_set <- pre_process_data_FT(test_set)
+
+# Build model - can take a some minutes
+model_randomForest <- randomForest(x = train_x, y = train_set$rating)
+```
 
 # III.Results
-Now we have our model, we are ready to evaluate the model. The results are as bellow:
-```{r results, echo= FALSE}
+Now we have our models, we are ready to evaluate the model on the `evaluate` dataset. 
 
+### Linear model
+The results are the following:
+```{r results, echo= FALSE}
 print(paste0("mu: ", round(mu,3)))
 print(paste0("lambda: ", round(lambda,3)))
-print(paste0("RMSE: ", round(final_rmse,5)))
+print(paste0("RMSE linear model: ", round(Results@linear_model,5)))
 ```
 
 $b_u$ and $b_i$ were widely distributed as seen below
-```{r b_i, b_u, echo=FALSE}
-
+```{r b_i, b_u, echo=FALSE, fig.height = 5, fig.width = 10, fig.align = "center"}
 ggplot(b_i, aes(x=b_i), alpha=0.8, size=0.8)  + 
   geom_histogram(binwidth=0.2, color="black", fill="lightblue")
+```
+
+```{r, echo=FALSE, fig.height = 5, fig.width = 10, fig.align = "center"}
 ggplot(b_u, aes(x=b_u), alpha=0.8, size=0.8)  +
   geom_histogram(binwidth=0.2, color="black", fill="lightblue")
 ```
 
+#### Decision tree:
+```{r, echo=FALSE}
+paste("RMSE decision tree: ", Results@decision_tree)
+```
+
+### Random forest model:
+```{r, echo=FALSE}
+paste("RMSE random forest model: ", Results@random_forest)
+```
+
+The following shows the winner : the **linear model** with an RMSE equals to 0.8649659.
+```{r, echo=FALSE, fig.height = 5, fig.width = 10, fig.align = "center"}
+plot4
+```
+
 # IV. Conclusion
-The model implemented relies only on the overall mean, the regularized movie effect, and the regularized user effect. It comes very close to the best possible result.
 
-Further improvements would not only require substantially more effort, but also more computing resources, in particular enough memory for operations on large matrices (even if sparse matrices are used).
+Our initial question was to predict the rating from the other columns. I answered by creating 3 models : a linear model, a decision tree and a random forest model. 
+After pre-processing our training dataset, I implemented them. The size of our dataset has shown the efficiency of the linear model over big dataset. However, the decision tree and random forest model are more sensible to big dataset and require bigger computational resources. We reach to test those two precedents models by downsizing our training dataset.
 
-Thank you for reading :-)
+The classement of those 3 methods according the RMSE criteria is the following: 1 : linear model, 2 : decision tree and 3 : random forest model. 
+
+The linear model meets the best criteria defined in this project evaluation.
+
+---
+
+Thank you the edx team for the hard work, thank you for reading ! :-)
+
+If you have any questions, I would be glad to answer you (pop up me on LinkedIn for example).
 .
